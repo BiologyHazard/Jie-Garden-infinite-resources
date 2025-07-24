@@ -1,6 +1,5 @@
 import enum
 import multiprocessing
-from collections.abc import Iterable
 from enum import Enum
 from typing import NamedTuple
 
@@ -68,7 +67,12 @@ class 求解器类:
             起始源石锭数量 = 起始状态.源石锭数量
             起始烛火数量 = 起始状态.烛火数量
 
-            if 起始源石锭数量 < 50:
+            if 起始源石锭数量 < 20:
+                每次尝试消耗源石锭数量 = 10
+                最多可尝试次数 = 起始源石锭数量 // 每次尝试消耗源石锭数量
+                尝试成功获得源石锭数量 = 15
+                尝试成功获得烛火数量 = 2
+            elif 起始源石锭数量 < 50:
                 每次尝试消耗源石锭数量 = 20
                 最多可尝试次数 = 起始源石锭数量 // 每次尝试消耗源石锭数量
                 尝试成功获得源石锭数量 = 30
@@ -79,7 +83,7 @@ class 求解器类:
                 尝试成功获得源石锭数量 = 65
                 尝试成功获得烛火数量 = 6
 
-            if 起始烛火数量 <= 0 or 起始源石锭数量 < 20:  # 没有烛火或者源石锭，失败
+            if 起始烛火数量 <= 0 or 起始源石锭数量 < 10:  # 没有烛火或者源石锭，失败
                 转移概率列表.append((起始状态, 1))
 
             elif 起始烛火数量 > 1:  # 有烛火，则拿源石锭
@@ -96,104 +100,98 @@ class 求解器类:
                 失败概率 = self.投出至少2枚厉钱所需投钱次数的分布.sf(最多可尝试次数)
                 转移概率列表.append((self.获取状态(源石锭数量=起始源石锭数量 - 每次尝试消耗源石锭数量 * 最多可尝试次数, 烛火数量=起始烛火数量 - 1), 失败概率))  # 没有投出2枚厉钱
 
+        转移概率列表 = [(目标状态, 概率) for 目标状态, 概率 in 转移概率列表 if 概率 > 0]
         assert np.isclose(sum(x[1] for x in 转移概率列表), 1)
         return 转移概率列表
 
     def 构建状态列表(self) -> None:
         self.状态列表: list[状态类] = []
         self.状态列表.extend(过渡态类(源石锭数量=源石锭数量, 烛火数量=烛火数量)
-                         for 源石锭数量 in range(0, self.电表倒转成功源石锭阈值 + 1, 1) for 烛火数量 in range(0, 7, 1))
+                         for 源石锭数量 in range(0, self.电表倒转成功源石锭阈值 + 1, 1)
+                         for 烛火数量 in range(0, 6 + 1, 1))
         self.状态列表.append(吸收态类.源石锭达到阈值)
 
         self.状态数量: int = len(self.状态列表)
         self.状态索引: dict[状态类, int] = {状态: i for i, 状态 in enumerate(self.状态列表)}
 
-        self.失败状态序号列表: list[int] = [状态序号 for 状态序号, 状态 in enumerate(self.状态列表) if not isinstance(状态, 吸收态类) and (状态.源石锭数量 < 20 or 状态.烛火数量 <= 0)]
+        self.失败状态序号列表: list[int] = [状态序号 for 状态序号, 状态 in enumerate(self.状态列表) if not isinstance(状态, 吸收态类) and (状态.源石锭数量 < 10 or 状态.烛火数量 <= 0)]
         self.成功状态序号列表: list[int] = [self.状态索引[吸收态类.源石锭达到阈值]]
         self.中间态序号列表: list[int] = [状态序号 for 状态序号, 状态 in enumerate(self.状态列表) if 状态序号 not in self.失败状态序号列表 and 状态序号 not in self.成功状态序号列表]
 
     def 构建状态转移矩阵(self) -> None:
         dok_状态转移矩阵 = scipy.sparse.dok_array((self.状态数量, self.状态数量))
-        for 起始状态 in self.状态列表:
-            起始状态索引 = self.状态索引[起始状态]
+        for 起始状态序号, 起始状态 in enumerate(self.状态列表):
             转移概率列表 = self.状态转移(起始状态)
             for 目标状态, 概率 in 转移概率列表:
-                目标状态索引 = self.状态索引[目标状态]
-                dok_状态转移矩阵[起始状态索引, 目标状态索引] += 概率
+                目标状态序号 = self.状态索引[目标状态]
+                dok_状态转移矩阵[起始状态序号, 目标状态序号] += 概率
         self.状态转移矩阵 = dok_状态转移矩阵.tocsr()
 
+    # def 迭代计算成功概率(self, 初始源石锭数量: int, 迭代次数: int) -> tuple[float, float, float]:
+    #     初始状态 = 过渡态类(源石锭数量=初始源石锭数量, 烛火数量=1)
+    #     当前状态分布 = np.zeros(self.状态数量)
+    #     当前状态分布[self.状态索引[初始状态]] = 1
 
-def 单个衡钱和厉钱数量计算(电表倒转成功源石锭阈值: int, 衡钱数量: int, 厉钱数量: int, 迭代次数: int, 初始源石锭数量范围: Iterable[int]) -> list[tuple[int, int, float, float, float]]:
+    #     for _ in range(迭代次数):
+    #         当前状态分布 = 当前状态分布 @ self.状态转移矩阵
+
+    #     失败概率 = np.sum(当前状态分布[self.失败状态序号列表])
+    #     成功概率 = np.sum(当前状态分布[self.成功状态序号列表])
+    #     中间态概率 = np.sum(当前状态分布[self.中间态序号列表])
+
+    #     return 失败概率, 成功概率, 中间态概率
+
+    def 计算成功概率(self) -> list[tuple[int, int, int, float]]:
+        失败状态矩阵 = scipy.sparse.dok_array((len(self.失败状态序号列表), self.状态数量))
+        for i, 状态序号 in enumerate(self.失败状态序号列表):
+            失败状态矩阵[i, 状态序号] = 1
+        失败状态矩阵 = 失败状态矩阵.tocsr()
+
+        成功状态矩阵 = scipy.sparse.dok_array((len(self.成功状态序号列表), self.状态数量))
+        for i, 状态序号 in enumerate(self.成功状态序号列表):
+            成功状态矩阵[i, 状态序号] = 1
+        成功状态矩阵 = 成功状态矩阵.tocsr()
+
+        矩阵 = scipy.sparse.vstack([self.状态转移矩阵 - scipy.sparse.identity(self.状态数量, format='csr'), 失败状态矩阵, 成功状态矩阵])
+        向量 = np.hstack([np.zeros(self.状态数量), np.zeros(len(self.失败状态序号列表)), np.ones(len(self.成功状态序号列表))])
+
+        最小二乘结果 = scipy.sparse.linalg.lsqr(矩阵, 向量, atol=0, btol=0)
+        最小二乘解 = 最小二乘结果[0]
+
+        结果列表 = []
+        for 初始源石锭数量 in range(0, self.电表倒转成功源石锭阈值 + 1, 1):
+            状态 = 过渡态类(源石锭数量=初始源石锭数量, 烛火数量=1)
+            状态序号 = self.状态索引[状态]
+            成功概率 = 最小二乘解[状态序号]
+            结果列表.append((self.衡钱数量, self.厉钱数量, 初始源石锭数量, 成功概率))
+        return 结果列表
+
+
+def 单个衡钱和厉钱数量计算(电表倒转成功源石锭阈值: int, 衡钱数量: int, 厉钱数量: int) -> list[tuple[int, int, int, float]]:
     求解器 = 求解器类(电表倒转成功源石锭阈值=电表倒转成功源石锭阈值, 衡钱数量=衡钱数量, 厉钱数量=厉钱数量)
     求解器.构建状态列表()
     求解器.构建状态转移矩阵()
     print(f"状态转移矩阵构建完成，状态数量：{求解器.状态数量}")
-
-    失败状态矩阵 = scipy.sparse.dok_array((len(失败状态序号列表), 状态数量))
-    for i, 状态序号 in enumerate(失败状态序号列表):
-        失败状态矩阵[i, 状态序号] = 1
-    失败状态矩阵 = 失败状态矩阵.tocsr()
-
-    成功状态矩阵 = scipy.sparse.dok_array((len(成功状态序号列表), 状态数量))
-    for i, 状态序号 in enumerate(成功状态序号列表):
-        成功状态矩阵[i, 状态序号] = 1
-    成功状态矩阵 = 成功状态矩阵.tocsr()
-
-    矩阵 = scipy.sparse.vstack([状态转移矩阵 - scipy.sparse.identity(状态数量, format='csr'), 失败状态矩阵, 成功状态矩阵])
-    向量 = np.hstack([np.zeros(状态数量), np.zeros(len(失败状态序号列表)), np.ones(len(成功状态序号列表))])
-
-    result = scipy.sparse.linalg.lsqr(矩阵, 向量, atol=0, btol=0)
-    解 = result[0]
-    print(result)
-
-    for 源石锭数量 in range(0, 1025, 16):
-        状态 = 过渡态类(源石锭数量=源石锭数量, 烛火数量=1)
-        状态序号 = 状态索引[状态]
-        成功概率 = 解[状态序号]
-        print(f"源石锭数量：{源石锭数量:4}，成功概率：{成功概率:9.4%}")
-
-    return []
-
-    结果 = []
-    for 初始源石锭数量 in 初始源石锭数量范围:
-        初始状态 = 过渡态类(源石锭数量=初始源石锭数量, 烛火数量=1)
-        当前状态分布 = np.zeros(状态数量)
-        当前状态分布[状态索引[初始状态]] = 1
-        for i in range(迭代次数):
-            当前状态分布 = 当前状态分布 @ 状态转移矩阵
-
-        失败概率 = np.sum(当前状态分布[失败状态序号列表])
-        成功概率 = np.sum(当前状态分布[成功状态序号列表])
-        中间态概率 = np.sum(当前状态分布[中间态序号列表])
-        print(f"游客分队，衡钱数量：{衡钱数量}，厉钱数量：{厉钱数量}，初始源石锭数量：{初始源石锭数量:4}，失败概率：{失败概率:9.4%}，成功概率：{成功概率:9.4%}，中间态概率：{中间态概率:9.4%}")
-
-        结果.append((衡钱数量, 厉钱数量, 初始源石锭数量, 失败概率, 成功概率, 中间态概率))
-    return 结果
+    结果列表 = 求解器.计算成功概率()
+    for 衡钱数量, 厉钱数量, 初始源石锭数量, 成功概率 in 结果列表:
+        print(f"游客分队，衡钱数量：{衡钱数量}，厉钱数量：{厉钱数量}，初始源石锭数量：{初始源石锭数量}，成功概率：{成功概率:.4f}")
+    return 结果列表
 
 
 if __name__ == "__main__":
-    电表倒转成功源石锭阈值 = 2048
+    电表倒转成功源石锭阈值 = 4096
     待计算的衡钱和厉钱数量范围 = [(4, 7), (4, 8), (5, 5), (5, 6), (5, 7), (6, 5), (6, 6), (7, 5)]
-    迭代次数 = 8192
-    初始源石锭数量范围 = range(0, 1024 + 1, 32)
 
-    单个衡钱和厉钱数量计算(
-        电表倒转成功源石锭阈值=电表倒转成功源石锭阈值,
-        衡钱数量=5,
-        厉钱数量=5,
-        迭代次数=迭代次数,
-        初始源石锭数量范围=初始源石锭数量范围
-    )
+    with multiprocessing.Pool(processes=len(待计算的衡钱和厉钱数量范围)) as pool:
+        results = pool.starmap(
+            单个衡钱和厉钱数量计算,
+            ((电表倒转成功源石锭阈值, 衡钱数量, 厉钱数量)
+             for 衡钱数量, 厉钱数量 in 待计算的衡钱和厉钱数量范围)
+        )
 
-    # with multiprocessing.Pool(processes=len(待计算的衡钱和厉钱数量范围)) as pool:
-    #     results = pool.starmap(
-    #         单个衡钱和厉钱数量计算,
-    #         ((电表倒转成功源石锭阈值, 衡钱数量, 厉钱数量, 迭代次数, 初始源石锭数量范围) for 衡钱数量, 厉钱数量 in 待计算的衡钱和厉钱数量范围)
-    #     )
+    结果列表 = []
+    for 单个结果 in results:
+        结果列表.extend(单个结果)
 
-    # 结果列表 = []
-    # for 单个结果 in results:
-    #     结果列表.extend(单个结果)
-
-    # df = pd.DataFrame(结果列表, columns=["衡钱数量", "厉钱数量", "初始源石锭数量", "失败概率", "成功概率", "中间态概率"])
-    # df.to_csv("游客分队源石锭电表倒转成功概率.csv", index=False)
+    df = pd.DataFrame(结果列表, columns=["衡钱数量", "厉钱数量", "初始源石锭数量", "电表倒转成功概率"])
+    df.to_csv("游客分队电表倒转成功概率.csv", index=False)
